@@ -4,13 +4,30 @@
   "description": "Live token usage, cost and context-window tracking for Claude Code, right in VS Code.",
   "version": "0.1.0",
   "publisher": "svendemey",
-  "private": true,
   "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t4ai-workshops/claude-token-counter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/t4ai-workshops/claude-token-counter/issues"
+  },
+  "homepage": "https://github.com/t4ai-workshops/claude-token-counter#readme",
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "token usage",
+    "cost tracking",
+    "context window"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -79,6 +96,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.23.0",
     "typescript": "^5.5.0"
   }
