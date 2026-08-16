@@ -42,13 +42,18 @@ After enabling, start (or restart) Claude Code in a terminal in that workspace �
 ## What it shows
 
 - **Status bar**: model, session cost, and context-window usage (configurable via `claudeTokenCounter.statusBarFormat`).
-- **Sidebar panel** (Claude Token Counter icon in the Activity Bar): current session detail (tokens, cache read/write, rate limits on Pro/Max plans) plus all-time totals per project.
+- **Sidebar panel** (Claude Token Counter icon in the Activity Bar):
+  - **Current session** — tokens, cache read/write, context % for whichever session is active in this workspace.
+  - **Plan limits (Anthropic)** — your Pro/Max 5-hour and 7-day quota usage, with reset times. This is the *account-level* limit Anthropic enforces, as opposed to what you've actually spent. It's a last-known snapshot (kept visible even between sessions) rather than tied to the current session, since statusLine is the only source for it and doesn't fire for every session — see the limitation below.
+  - **Your usage** — today's and the last-7-days' totals across every project, with a daily bar chart. Built from a delta-based day-by-day rollup, so it's accurate even across sessions that span midnight.
+  - **Projects (all time)** — cumulative cost/tokens per project.
 
-Cost is whatever Claude Code itself reports (`cost.total_cost_usd`) — computed client-side at list rates, so it may differ slightly from your actual invoice.
+Cost is whatever Claude Code itself reports (`cost.total_cost_usd`) for statusLine-tracked sessions — computed client-side at list rates, so it may differ slightly from your actual invoice. Transcript-fallback sessions get an estimate instead (see above).
 
 ## Limitations
 
-- Rate-limit percentages (`5h` / `7d`) only appear for Claude.ai Pro/Max subscribers; not for API-key/console billing.
+- **Plan limits (5h/7d quota %) require a statusLine session** — they're Anthropic account data that only rides along on statusLine updates, so they're never available for chat-panel (transcript-fallback) sessions no matter what. Run Claude Code in a terminal at least occasionally to keep this section current.
+- Rate-limit percentages (`5h` / `7d`) only appear for Claude.ai Pro/Max subscribers to begin with; not for API-key/console billing.
 - Requires `node` to be resolvable from the shell Claude Code runs in (true for any machine that has Claude Code installed).
 - Windows without Git Bash: statusLine commands run through PowerShell instead of bash; the generated `node "<path>"` command should still work, but this hasn't been tested there.
 

@@ -154,8 +154,36 @@ export interface ProjectSummary {
   >;
 }
 
+/** One calendar day's worth of usage (local time), summed across every
+ * session/turn seen that day — the basis for the "today" / "last 7 days"
+ * figures, independent of which project or session it came from. */
+export interface DailyBucket {
+  /** Local calendar date, "YYYY-MM-DD". */
+  date: string;
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+/** The most recently observed Anthropic plan-limit reading. Only ever
+ * comes from statusline (Claude.ai Pro/Max only) — the transcript fallback
+ * has no equivalent, since that data isn't written to transcript files.
+ * Kept as a standalone last-known snapshot (rather than per-session) so it
+ * stays visible on the dashboard even when no session is currently live. */
+export interface RateLimitSnapshot {
+  observedAt: string;
+  fiveHourUsedPercentage?: number;
+  fiveHourResetsAt?: number; // unix epoch seconds
+  sevenDayUsedPercentage?: number;
+  sevenDayResetsAt?: number; // unix epoch seconds
+}
+
 export interface HistoryData {
   /** schema version, bump if the on-disk shape changes */
-  version: 1;
+  version: 1 | 2;
   sessions: Record<string, SessionSummary>;
+  /** Added in v2 — absent/undefined on data written by v1 and backfilled
+   * on load. Keyed by "YYYY-MM-DD". */
+  daily?: Record<string, DailyBucket>;
+  lastRateLimits?: RateLimitSnapshot;
 }

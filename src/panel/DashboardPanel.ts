@@ -35,6 +35,13 @@ export class DashboardPanel implements vscode.WebviewViewProvider {
 
   private render(): void {
     if (!this.view) return;
-    this.view.webview.html = getDashboardHtml(this.view.webview, this.currentSession, this.history.projectSummaries());
+    this.view.webview.html = getDashboardHtml(this.view.webview, {
+      currentSession: this.currentSession,
+      projects: this.history.projectSummaries(),
+      rateLimits: this.history.getLastRateLimits(),
+      today: this.history.lastNDaysTotal(1),
+      last7Days: this.history.lastNDaysTotal(7),
+      dailyBreakdown: this.history.dailySummaries(7),
+    });
   }
 }

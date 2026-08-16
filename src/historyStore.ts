@@ -1,10 +1,20 @@
 import * as fs from "fs";
 import * as path from "path";
-import { HistoryData, ProjectSummary, SessionSummary, StatusLinePayload, TranscriptTurn } from "./types";
+import { DailyBucket, HistoryData, ProjectSummary, RateLimitSnapshot, SessionSummary, StatusLinePayload, TranscriptTurn } from "./types";
 import { contextWindowSizeFor, estimateCostUsd } from "./pricing";
 
 function projectKeyForDir(dir: string): { key: string; label: string } {
   return { key: `dir:${dir}`, label: path.basename(dir) || dir };
+}
+
+/** Local-time "YYYY-MM-DD" — day buckets follow the user's wall clock, not
+ * UTC, since that's what "today" means when someone asks about it. */
+function localDateKey(isoOrDate: string | Date): string {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 /**
@@ -32,13 +42,15 @@ export class HistoryStore {
     try {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as HistoryData;
-      if (parsed && parsed.version === 1 && parsed.sessions) {
-        return parsed;
+      if (parsed && (parsed.version === 1 || parsed.version === 2) && parsed.sessions) {
+        // v1 files predate `daily`/`lastRateLimits` — backfill rather than
+        // discard the sessions/projects history already on disk.
+        return { version: 2, sessions: parsed.sessions, daily: parsed.daily ?? {}, lastRateLimits: parsed.lastRateLimits };
       }
     } catch {
       // No file yet, or corrupt — start fresh rather than crashing the extension.
     }
-    return { version: 1, sessions: {} };
+    return { version: 2, sessions: {}, daily: {} };
   }
 
   private save(): void {
@@ -49,15 +61,33 @@ export class HistoryStore {
     fs.renameSync(tmp, this.filePath);
   }
 
+  private addToDailyBucket(timestamp: string, costUsd: number, inputTokens: number, outputTokens: number): void {
+    if (costUsd <= 0 && inputTokens <= 0 && outputTokens <= 0) return;
+    if (!this.data.daily) this.data.daily = {};
+    const key = localDateKey(timestamp);
+    const bucket = this.data.daily[key] ?? { date: key, totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0 };
+    bucket.totalCostUsd += costUsd;
+    bucket.totalInputTokens += inputTokens;
+    bucket.totalOutputTokens += outputTokens;
+    this.data.daily[key] = bucket;
+  }
+
   /** Apply one statusline update. Statusline totals are cumulative per
    * session, so this is a plain overwrite keyed by session_id — safe to
-   * call with the same or an older snapshot repeatedly. */
+   * call with the same or an older snapshot repeatedly. The day/week
+   * rollup needs deltas though, so we diff against the previous snapshot
+   * for this session before overwriting (clamped at 0 — a session cost
+   * only ever goes up, but guard against `/clear` or a corrected reading). */
   applyPayload(payload: StatusLinePayload, receivedAt: string): void {
     const { key: projectKey, label: projectLabel } = projectKeyFor(payload);
     const usage = payload.context_window;
     const cost = payload.cost;
 
     const existing = this.data.sessions[payload.session_id];
+    const newCost = cost?.total_cost_usd ?? existing?.totalCostUsd ?? 0;
+    const newInput = usage?.total_input_tokens ?? existing?.totalInputTokens ?? 0;
+    const newOutput = usage?.total_output_tokens ?? existing?.totalOutputTokens ?? 0;
+
     const summary: SessionSummary = {
       sessionId: payload.session_id,
       sessionName: payload.session_name,
@@ -67,9 +97,9 @@ export class HistoryStore {
       projectLabel,
       firstSeen: existing?.firstSeen ?? receivedAt,
       lastSeen: receivedAt,
-      totalCostUsd: cost?.total_cost_usd ?? existing?.totalCostUsd ?? 0,
-      totalInputTokens: usage?.total_input_tokens ?? existing?.totalInputTokens ?? 0,
-      totalOutputTokens: usage?.total_output_tokens ?? existing?.totalOutputTokens ?? 0,
+      totalCostUsd: newCost,
+      totalInputTokens: newInput,
+      totalOutputTokens: newOutput,
       cacheCreationInputTokens:
         usage?.current_usage?.cache_creation_input_tokens ?? existing?.cacheCreationInputTokens ?? 0,
       cacheReadInputTokens: usage?.current_usage?.cache_read_input_tokens ?? existing?.cacheReadInputTokens ?? 0,
@@ -77,13 +107,34 @@ export class HistoryStore {
     };
 
     this.data.sessions[payload.session_id] = summary;
+
+    this.addToDailyBucket(
+      receivedAt,
+      Math.max(0, newCost - (existing?.totalCostUsd ?? 0)),
+      Math.max(0, newInput - (existing?.totalInputTokens ?? 0)),
+      Math.max(0, newOutput - (existing?.totalOutputTokens ?? 0))
+    );
+
+    if (payload.rate_limits) {
+      const prev = this.data.lastRateLimits;
+      const snapshot: RateLimitSnapshot = {
+        observedAt: receivedAt,
+        fiveHourUsedPercentage: payload.rate_limits.five_hour?.used_percentage ?? prev?.fiveHourUsedPercentage,
+        fiveHourResetsAt: payload.rate_limits.five_hour?.resets_at ?? prev?.fiveHourResetsAt,
+        sevenDayUsedPercentage: payload.rate_limits.seven_day?.used_percentage ?? prev?.sevenDayUsedPercentage,
+        sevenDayResetsAt: payload.rate_limits.seven_day?.resets_at ?? prev?.sevenDayResetsAt,
+      };
+      this.data.lastRateLimits = snapshot;
+    }
+
     this.save();
   }
 
   /** Apply one transcript-derived turn (the fallback path for sessions
    * that never trigger statusline — see transcriptWatcher.ts). Unlike
    * statusline snapshots, transcript turns are per-message deltas, so
-   * these accumulate instead of overwriting. A session already tracked
+   * these accumulate instead of overwriting (which also means the day
+   * bucket for a turn is exact, not diffed). A session already tracked
    * via statusline is left alone — that source is authoritative when both
    * are somehow available. */
   applyTranscriptTurn(turn: TranscriptTurn): void {
@@ -112,6 +163,7 @@ export class HistoryStore {
     };
 
     this.data.sessions[turn.sessionId] = summary;
+    this.addToDailyBucket(turn.timestamp, addedCost, turn.usage.inputTokens, turn.usage.outputTokens);
     this.save();
   }
 
@@ -121,6 +173,37 @@ export class HistoryStore {
 
   allSessions(): SessionSummary[] {
     return Object.values(this.data.sessions);
+  }
+
+  getLastRateLimits(): RateLimitSnapshot | undefined {
+    return this.data.lastRateLimits;
+  }
+
+  /** The last `days` calendar days (today first), zero-filled for days
+   * with no recorded activity so the UI can render a clean fixed-length
+   * list without special-casing gaps. */
+  dailySummaries(days: number): DailyBucket[] {
+    const result: DailyBucket[] = [];
+    const now = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const key = localDateKey(d);
+      result.push(this.data.daily?.[key] ?? { date: key, totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0 });
+    }
+    return result;
+  }
+
+  /** Rolling sum over the last `days` calendar days, today inclusive —
+   * e.g. lastNDaysTotal(1) is "today", lastNDaysTotal(7) is "last 7 days". */
+  lastNDaysTotal(days: number): { totalCostUsd: number; totalInputTokens: number; totalOutputTokens: number } {
+    return this.dailySummaries(days).reduce(
+      (acc, b) => ({
+        totalCostUsd: acc.totalCostUsd + b.totalCostUsd,
+        totalInputTokens: acc.totalInputTokens + b.totalInputTokens,
+        totalOutputTokens: acc.totalOutputTokens + b.totalOutputTokens,
+      }),
+      { totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0 }
+    );
   }
 
   /** Sum every recorded session, grouped by project. */
@@ -165,7 +248,7 @@ export class HistoryStore {
   }
 
   reset(): void {
-    this.data = { version: 1, sessions: {} };
+    this.data = { version: 2, sessions: {}, daily: {} };
     this.save();
   }
 }
