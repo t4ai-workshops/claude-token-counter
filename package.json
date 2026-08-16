@@ -3,7 +3,7 @@
   "displayName": "Claude Token Counter",
   "description": "Live token usage, cost and context-window tracking for Claude Code, right in VS Code.",
   "version": "0.1.0",
-  "publisher": "svendemey",
+  "publisher": "SvenDeMey3DPets",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
