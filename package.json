@@ -1,0 +1,85 @@
+{
+  "name": "claude-token-counter",
+  "displayName": "Claude Token Counter",
+  "description": "Live token usage, cost and context-window tracking for Claude Code, right in VS Code.",
+  "version": "0.1.0",
+  "publisher": "svendemey",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeTokenCounter",
+          "title": "Claude Token Counter",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeTokenCounter": [
+        {
+          "type": "webview",
+          "id": "claudeTokenCounter.dashboard",
+          "name": "Usage"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeTokenCounter.enableForWorkspace",
+        "title": "Claude Token Counter: Enable for This Workspace"
+      },
+      {
+        "command": "claudeTokenCounter.enableGlobally",
+        "title": "Claude Token Counter: Enable Globally (All Projects)"
+      },
+      {
+        "command": "claudeTokenCounter.showDashboard",
+        "title": "Claude Token Counter: Show Dashboard"
+      },
+      {
+        "command": "claudeTokenCounter.resetHistory",
+        "title": "Claude Token Counter: Reset Stored History"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Token Counter",
+      "properties": {
+        "claudeTokenCounter.statusBarFormat": {
+          "type": "string",
+          "enum": [
+            "costAndContext",
+            "tokensOnly",
+            "costOnly"
+          ],
+          "default": "costAndContext",
+          "description": "What to show in the status bar item."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc --noEmit -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0"
+  }
+}
