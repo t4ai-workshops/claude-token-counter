@@ -13,7 +13,20 @@ This extension:
 3. The script appends every update it receives to an append-only log.
 4. The extension tails that log, updates the VS Code status bar and sidebar in near real time, and rolls totals up into a local history file grouped by project.
 
-Nothing is parsed from Claude Code's internal transcript files (`~/.claude/projects/*.jsonl`) — that format is explicitly undocumented and can change between Claude Code releases. Only the documented statusLine JSON schema is relied on.
+### The catch: statusLine is a terminal-only feature
+
+`statusLine` only fires when Claude Code is rendering an interactive terminal UI. Sessions started via the **official Claude Code VS Code extension's own chat panel** run `claude` headlessly (`--no-chrome --output-format stream-json`) — there's no terminal to draw a status line into, so it never triggers, and this extension would otherwise show nothing for that entire (very common) way of using Claude Code in VS Code.
+
+To cover that case, the extension also **tails Claude Code's transcript files** (`~/.claude/projects/<project>/<session-id>.jsonl`) as a best-effort fallback, extracting the same per-turn `usage` data Claude Code writes there regardless of UI mode. This format is explicitly undocumented by Anthropic and can change between releases, so:
+
+- It's used only for sessions that never sent a statusLine update — a session already tracked via statusLine is left alone.
+- Cost is *estimated* from token counts at list pricing (shown with `~` and "estimated" in the UI) rather than reported by Claude Code itself, since the transcript doesn't include a running cost total.
+- It can be turned off via `claudeTokenCounter.enableTranscriptFallback` if a future Claude Code release breaks the parsing (everything is read defensively and fails silent-skip, never crashes, but the numbers could go stale or wrong).
+
+| How you run Claude Code | Data source |
+|---|---|
+| `claude` in a terminal (standalone, or VS Code's own integrated terminal) | statusLine (authoritative) |
+| The official Claude Code extension's chat panel | transcript tailing (best-effort, estimated cost) |
 
 ## Setup
 

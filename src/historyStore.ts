@@ -1,6 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
-import { HistoryData, ProjectSummary, SessionSummary, StatusLinePayload } from "./types";
+import { HistoryData, ProjectSummary, SessionSummary, StatusLinePayload, TranscriptTurn } from "./types";
+import { contextWindowSizeFor, estimateCostUsd } from "./pricing";
+
+function projectKeyForDir(dir: string): { key: string; label: string } {
+  return { key: `dir:${dir}`, label: path.basename(dir) || dir };
+}
 
 /**
  * Groups sessions into a "project" for the history rollup. Prefers the git
@@ -13,7 +18,7 @@ export function projectKeyFor(payload: StatusLinePayload): { key: string; label:
     return { key: `repo:${repo.host}/${repo.owner}/${repo.name}`, label: `${repo.owner}/${repo.name}` };
   }
   const dir = payload.workspace?.project_dir || payload.workspace?.current_dir || payload.cwd || "unknown";
-  return { key: `dir:${dir}`, label: path.basename(dir) || dir };
+  return projectKeyForDir(dir);
 }
 
 export class HistoryStore {
@@ -68,9 +73,45 @@ export class HistoryStore {
       cacheCreationInputTokens:
         usage?.current_usage?.cache_creation_input_tokens ?? existing?.cacheCreationInputTokens ?? 0,
       cacheReadInputTokens: usage?.current_usage?.cache_read_input_tokens ?? existing?.cacheReadInputTokens ?? 0,
+      source: "statusline",
     };
 
     this.data.sessions[payload.session_id] = summary;
+    this.save();
+  }
+
+  /** Apply one transcript-derived turn (the fallback path for sessions
+   * that never trigger statusline — see transcriptWatcher.ts). Unlike
+   * statusline snapshots, transcript turns are per-message deltas, so
+   * these accumulate instead of overwriting. A session already tracked
+   * via statusline is left alone — that source is authoritative when both
+   * are somehow available. */
+  applyTranscriptTurn(turn: TranscriptTurn): void {
+    const existing = this.data.sessions[turn.sessionId];
+    if (existing?.source === "statusline") return;
+
+    const { key: projectKey, label: projectLabel } = projectKeyForDir(turn.cwd);
+    const addedCost = estimateCostUsd(turn.modelId, turn.usage);
+
+    const summary: SessionSummary = {
+      sessionId: turn.sessionId,
+      modelId: turn.modelId,
+      modelDisplayName: existing?.modelDisplayName ?? turn.modelId,
+      projectKey,
+      projectLabel,
+      firstSeen: existing?.firstSeen ?? turn.timestamp,
+      lastSeen: turn.timestamp,
+      totalCostUsd: (existing?.totalCostUsd ?? 0) + addedCost,
+      totalInputTokens: (existing?.totalInputTokens ?? 0) + turn.usage.inputTokens,
+      totalOutputTokens: (existing?.totalOutputTokens ?? 0) + turn.usage.outputTokens,
+      cacheCreationInputTokens: (existing?.cacheCreationInputTokens ?? 0) + turn.usage.cacheCreationInputTokens,
+      cacheReadInputTokens: (existing?.cacheReadInputTokens ?? 0) + turn.usage.cacheReadInputTokens,
+      source: "transcript",
+      lastContextTokens: turn.usage.inputTokens + turn.usage.cacheCreationInputTokens + turn.usage.cacheReadInputTokens,
+      lastContextWindowSize: contextWindowSizeFor(turn.modelId),
+    };
+
+    this.data.sessions[turn.sessionId] = summary;
     this.save();
   }
 

@@ -65,6 +65,30 @@ export interface StoredEvent {
   payload: StatusLinePayload;
 }
 
+/**
+ * One `assistant`-type entry pulled from a Claude Code transcript file
+ * (`~/.claude/projects/<project>/<session-id>.jsonl`). This is our
+ * best-effort fallback for sessions that never trigger `statusLine` — most
+ * notably ones driven by the official Claude Code VS Code extension's own
+ * chat panel, which launches `claude` in a headless `--no-chrome
+ * --output-format stream-json` mode with no terminal UI to render a status
+ * line into. The transcript format is explicitly undocumented and can
+ * change between Claude Code releases, so every field here is read
+ * defensively and this whole path is opt-out via a setting.
+ */
+export interface TranscriptTurn {
+  sessionId: string;
+  cwd: string;
+  timestamp: string;
+  modelId: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+  };
+}
+
 /** Rollup kept per session_id in history.json. */
 export interface SessionSummary {
   sessionId: string;
@@ -80,6 +104,39 @@ export interface SessionSummary {
   totalOutputTokens: number;
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
+  /** Where this session's numbers came from — changes how they're
+   * accumulated (statusline totals are cumulative snapshots to overwrite;
+   * transcript turns are deltas to add up) and how cost is labeled. */
+  source: "statusline" | "transcript";
+  /** Context-in-use as of the most recent turn (not cumulative — this is a
+   * point-in-time figure, unlike the token/cost totals above). Only
+   * populated for transcript-sourced sessions; statusline sessions get the
+   * equivalent straight from `context_window` and don't need it stored. */
+  lastContextTokens?: number;
+  lastContextWindowSize?: number;
+}
+
+/** What the status bar and dashboard actually render — populated either
+ * directly from a statusline payload or synthesized from accumulated
+ * transcript turns, so the UI code doesn't need to know which source it
+ * came from. */
+export interface CurrentSessionView {
+  sessionId: string;
+  modelId: string;
+  modelDisplayName: string;
+  costUsd?: number;
+  costIsEstimate: boolean;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  contextUsedTokens?: number;
+  contextWindowSize?: number;
+  contextUsedPercentage?: number;
+  rateLimits?: {
+    fiveHour?: { usedPercentage: number };
+    sevenDay?: { usedPercentage: number };
+  };
 }
 
 /** Aggregated view across every session recorded for one project. */

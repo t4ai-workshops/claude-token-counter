@@ -2,7 +2,7 @@
   "name": "claude-token-counter",
   "displayName": "Claude Token Counter",
   "description": "Live token usage, cost and context-window tracking for Claude Code, right in VS Code.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "SvenDeMey3DPets",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -82,6 +82,11 @@
           ],
           "default": "costAndContext",
           "description": "What to show in the status bar item."
+        },
+        "claudeTokenCounter.enableTranscriptFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also track sessions that never trigger Claude Code's statusLine hook (notably the official Claude Code extension's own chat panel) by reading Claude Code's transcript files. Uses an undocumented, unstable file format as a best-effort fallback — disable if it ever misbehaves after a Claude Code update."
         }
       }
     }

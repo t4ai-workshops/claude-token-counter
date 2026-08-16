@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ProjectSummary, StatusLinePayload } from "../types";
+import { CurrentSessionView, ProjectSummary } from "../types";
 import { formatPricing } from "../pricing";
 
 function escapeHtml(s: string): string {
@@ -20,34 +20,34 @@ function fmtUsd(n: number): string {
   return `$${n.toFixed(n < 1 ? 4 : 2)}`;
 }
 
-function currentSessionSection(payload: StatusLinePayload | undefined): string {
-  if (!payload) {
-    return `<div class="empty">No active Claude Code session detected yet in this workspace.<br/>Start Claude Code in a terminal here to see live usage.</div>`;
+function currentSessionSection(view: CurrentSessionView | undefined): string {
+  if (!view) {
+    return `<div class="empty">No active Claude Code session detected yet in this workspace.<br/>Start Claude Code (terminal, or the chat panel) to see live usage.</div>`;
   }
 
-  const cost = payload.cost?.total_cost_usd;
-  const cw = payload.context_window;
-  const pricing = formatPricing(payload.model.id);
-  const rl = payload.rate_limits;
-
+  const pricing = formatPricing(view.modelId);
   const rows: string[] = [];
-  rows.push(row("Model", escapeHtml(payload.model.display_name) + (pricing ? ` <span class="muted">(${escapeHtml(pricing)})</span>` : "")));
-  if (typeof cost === "number") rows.push(row("Session cost", fmtUsd(cost)));
-  if (cw) {
-    rows.push(row("Input tokens", fmtTokens(cw.total_input_tokens)));
-    rows.push(row("Output tokens", fmtTokens(cw.total_output_tokens)));
-    if (cw.current_usage) {
-      rows.push(row("Cache read", fmtTokens(cw.current_usage.cache_read_input_tokens)));
-      rows.push(row("Cache written", fmtTokens(cw.current_usage.cache_creation_input_tokens)));
-    }
-    if (typeof cw.used_percentage === "number") {
-      rows.push(row("Context used", contextBar(cw.used_percentage) + ` ${cw.used_percentage.toFixed(1)}%`));
-    }
-  }
-  if (rl?.five_hour) rows.push(row("5h limit", `${rl.five_hour.used_percentage.toFixed(0)}%`));
-  if (rl?.seven_day) rows.push(row("7d limit", `${rl.seven_day.used_percentage.toFixed(0)}%`));
+  rows.push(row("Model", escapeHtml(view.modelDisplayName) + (pricing ? ` <span class="muted">(${escapeHtml(pricing)})</span>` : "")));
 
-  return `<table class="kv">${rows.join("")}</table>`;
+  if (typeof view.costUsd === "number") {
+    const label = view.costIsEstimate ? `~${fmtUsd(view.costUsd)} <span class="muted">(estimated)</span>` : fmtUsd(view.costUsd);
+    rows.push(row("Session cost", label));
+  }
+  if (typeof view.totalInputTokens === "number") rows.push(row("Input tokens", fmtTokens(view.totalInputTokens)));
+  if (typeof view.totalOutputTokens === "number") rows.push(row("Output tokens", fmtTokens(view.totalOutputTokens)));
+  if (typeof view.cacheReadTokens === "number") rows.push(row("Cache read", fmtTokens(view.cacheReadTokens)));
+  if (typeof view.cacheCreationTokens === "number") rows.push(row("Cache written", fmtTokens(view.cacheCreationTokens)));
+  if (typeof view.contextUsedPercentage === "number") {
+    rows.push(row("Context used", contextBar(view.contextUsedPercentage) + ` ${view.contextUsedPercentage.toFixed(1)}%`));
+  }
+  if (view.rateLimits?.fiveHour) rows.push(row("5h limit", `${view.rateLimits.fiveHour.usedPercentage.toFixed(0)}%`));
+  if (view.rateLimits?.sevenDay) rows.push(row("7d limit", `${view.rateLimits.sevenDay.usedPercentage.toFixed(0)}%`));
+
+  const note = view.costIsEstimate
+    ? `<div class="muted note">Estimated from Claude Code's transcript log — this session's chat panel doesn't report cost directly, so this is computed from token counts at list pricing.</div>`
+    : "";
+
+  return `<table class="kv">${rows.join("")}</table>${note}`;
 }
 
 function row(label: string, value: string): string {
@@ -89,11 +89,7 @@ function projectsSection(projects: ProjectSummary[]): string {
   return `<div class="projects">${items}</div>`;
 }
 
-export function getDashboardHtml(
-  webview: vscode.Webview,
-  currentSession: StatusLinePayload | undefined,
-  projects: ProjectSummary[]
-): string {
+export function getDashboardHtml(webview: vscode.Webview, currentSession: CurrentSessionView | undefined, projects: ProjectSummary[]): string {
   const nonce = String(Date.now());
   const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource};`;
 
@@ -123,6 +119,7 @@ export function getDashboardHtml(
   .kv .label { color: var(--vscode-descriptionForeground); width: 45%; }
   .kv .value { text-align: right; }
   .muted { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+  .note { margin-top: 6px; line-height: 1.4; }
   .empty { color: var(--vscode-descriptionForeground); padding: 8px 0; line-height: 1.5; }
   .bar {
     display: inline-block;

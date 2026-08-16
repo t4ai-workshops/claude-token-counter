@@ -3,11 +3,13 @@ import { getStoragePaths } from "./paths";
 import { writeBridgeScript } from "./bridgeScript";
 import { HistoryStore } from "./historyStore";
 import { EventWatcher } from "./eventWatcher";
+import { TranscriptWatcher } from "./transcriptWatcher";
 import { ClaudeStatusBar } from "./statusBar";
 import { DashboardPanel } from "./panel/DashboardPanel";
 import { registerCommands } from "./commands";
 import { inspectStatusLine, userSettingsPath, workspaceSettingsPath } from "./settingsInstaller";
-import { StoredEvent } from "./types";
+import { StoredEvent, TranscriptTurn } from "./types";
+import { fromSessionSummary, fromStatusLinePayload } from "./currentSession";
 
 export function activate(context: vscode.ExtensionContext): void {
   const paths = getStoragePaths(context);
@@ -24,14 +26,44 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(DashboardPanel.viewId, dashboard));
   context.subscriptions.push(statusBar);
 
+  // A Claude Code session's cwd only matters to *this* window when we have
+  // one to compare against — with no open folder, show whatever arrives.
+  const currentWorkspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const isRelevant = (cwd: string) => !currentWorkspaceDir || cwd === currentWorkspaceDir;
+
   const watcher = new EventWatcher(paths.eventsLog);
   watcher.on("event", (evt: StoredEvent) => {
     history.applyPayload(evt.payload, evt.received_at);
-    statusBar.update(evt.payload);
-    dashboard.setCurrentSession(evt.payload);
+    if (!isRelevant(evt.payload.cwd)) return;
+    const view = fromStatusLinePayload(evt.payload);
+    statusBar.update(view);
+    dashboard.setCurrentSession(view);
   });
   watcher.start();
   context.subscriptions.push({ dispose: () => watcher.stop() });
+
+  // Best-effort fallback for sessions statusLine never sees — chiefly the
+  // official Claude Code extension's own chat panel (headless --no-chrome
+  // mode has no terminal to render a status line into). Opt-out via
+  // settings since it depends on Claude Code's undocumented transcript
+  // format. See transcriptWatcher.ts for the full rationale.
+  const transcriptEnabled = vscode.workspace.getConfiguration("claudeTokenCounter").get<boolean>("enableTranscriptFallback", true);
+  let transcriptWatcher: TranscriptWatcher | undefined;
+  if (transcriptEnabled) {
+    transcriptWatcher = new TranscriptWatcher();
+    transcriptWatcher.on("turn", (turn: TranscriptTurn) => {
+      history.applyTranscriptTurn(turn);
+      if (!isRelevant(turn.cwd)) return;
+      const summary = history.getSession(turn.sessionId);
+      if (!summary) return;
+      const view = fromSessionSummary(summary);
+      statusBar.update(view);
+      dashboard.setCurrentSession(view);
+    });
+    transcriptWatcher.start();
+    const tw = transcriptWatcher;
+    context.subscriptions.push({ dispose: () => tw.stop() });
+  }
 
   registerCommands(context, paths, history, () => dashboard.reveal());
 

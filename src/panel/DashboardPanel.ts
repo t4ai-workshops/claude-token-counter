@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { StatusLinePayload } from "../types";
+import { CurrentSessionView } from "../types";
 import { HistoryStore } from "../historyStore";
 import { getDashboardHtml } from "./getHtml";
 
@@ -7,7 +7,7 @@ export class DashboardPanel implements vscode.WebviewViewProvider {
   static readonly viewId = "claudeTokenCounter.dashboard";
 
   private view: vscode.WebviewView | undefined;
-  private currentSession: StatusLinePayload | undefined;
+  private currentSession: CurrentSessionView | undefined;
 
   constructor(private readonly history: HistoryStore) {}
 
@@ -17,8 +17,8 @@ export class DashboardPanel implements vscode.WebviewViewProvider {
     this.render();
   }
 
-  setCurrentSession(payload: StatusLinePayload): void {
-    this.currentSession = payload;
+  setCurrentSession(view: CurrentSessionView): void {
+    this.currentSession = view;
     this.render();
   }
 
